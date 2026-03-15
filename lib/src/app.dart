@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:graphview/GraphView.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'controller.dart';
 import 'models.dart';
@@ -74,7 +75,7 @@ class _TaxonomyHomePageState extends State<TaxonomyHomePage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
   }
 
   @override
@@ -121,7 +122,6 @@ class _TaxonomyHomePageState extends State<TaxonomyHomePage>
           controller: _tabController,
           tabs: const <Widget>[
             Tab(text: 'Taxa'),
-            Tab(text: 'Tree'),
             Tab(text: 'Graph'),
           ],
         ),
@@ -141,7 +141,6 @@ class _TaxonomyHomePageState extends State<TaxonomyHomePage>
             onAddObservation: (Taxon taxon) =>
                 _showObservationEditor(context, taxon),
           ),
-          TreeTab(controller: controller),
           GraphTab(controller: controller),
         ],
       ),
@@ -402,41 +401,6 @@ class _TaxaTabState extends State<TaxaTab> {
   }
 }
 
-class TreeTab extends StatelessWidget {
-  const TreeTab({super.key, required this.controller});
-
-  final TaxonomyController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final List<TaxonNode> roots = controller.selectedTree;
-
-    if (roots.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            'Select one or more taxa from the list to build the minimal connecting tree.',
-            style: theme.textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-      children: roots
-          .map(
-            (TaxonNode node) =>
-                TreeNodeCard(node: node, controller: controller, depth: 0),
-          )
-          .toList(growable: false),
-    );
-  }
-}
-
 class GraphTab extends StatefulWidget {
   const GraphTab({super.key, required this.controller});
 
@@ -521,6 +485,7 @@ class _GraphTabState extends State<GraphTab> {
                     observationCount: controller.observationCountFor(
                       taxonNode.taxon.id,
                     ),
+                    onOpenWikipedia: () => _openWikipedia(context, taxonNode),
                   );
                 },
               ),
@@ -570,97 +535,20 @@ class _GraphTabState extends State<GraphTab> {
 
     return _GraphBuildResult(graph, taxonNodesById);
   }
-}
 
-class TreeNodeCard extends StatelessWidget {
-  const TreeNodeCard({
-    super.key,
-    required this.node,
-    required this.controller,
-    required this.depth,
-  });
-
-  final TaxonNode node;
-  final TaxonomyController controller;
-  final int depth;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final int observationCount = controller.observationCountFor(node.taxon.id);
-
-    return Padding(
-      padding: EdgeInsets.only(left: depth * 20, bottom: 10),
-      child: Container(
-        decoration: BoxDecoration(
-          color: node.isSelected ? const Color(0xFFE2F0EA) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border(
-            left: BorderSide(
-              color: node.isSelected
-                  ? theme.colorScheme.primary
-                  : theme.colorScheme.outlineVariant,
-              width: node.isSelected ? 4 : 2,
-            ),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          node.taxon.scientificName,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        if (node.taxon.commonName != null &&
-                            node.taxon.commonName!.isNotEmpty)
-                          Text(
-                            node.taxon.commonName!,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Chip(label: Text(node.taxon.rank.label)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (!node.isSelected)
-                Text('Ancestor context', style: theme.textTheme.bodySmall),
-              if (observationCount > 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Seen $observationCount time${observationCount == 1 ? '' : 's'}',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ),
-              if (node.children.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 12),
-                ...node.children.map(
-                  (TaxonNode child) => TreeNodeCard(
-                    node: child,
-                    controller: controller,
-                    depth: depth + 1,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
+  Future<void> _openWikipedia(BuildContext context, TaxonNode node) async {
+    final String articleTitle = node.taxon.scientificName.replaceAll(' ', '_');
+    final Uri uri = Uri.https('en.wikipedia.org', '/wiki/$articleTitle');
+    final bool launched = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
     );
+
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open Wikipedia for $articleTitle.')),
+      );
+    }
   }
 }
 
@@ -669,10 +557,12 @@ class GraphTaxonNodeCard extends StatelessWidget {
     super.key,
     required this.node,
     required this.observationCount,
+    required this.onOpenWikipedia,
   });
 
   final TaxonNode node;
   final int observationCount;
+  final VoidCallback onOpenWikipedia;
 
   @override
   Widget build(BuildContext context) {
@@ -684,64 +574,86 @@ class GraphTaxonNodeCard extends StatelessWidget {
         ? const Color(0xFFE2F0EA)
         : const Color(0xFFF8F6F1);
 
-    return Container(
-      constraints: const BoxConstraints(minWidth: 170, maxWidth: 220),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: backgroundColor,
+    return Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onOpenWikipedia,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderColor, width: node.isSelected ? 2 : 1),
-        boxShadow: const <BoxShadow>[
-          BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 12,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            node.taxon.scientificName,
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w700,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 170, maxWidth: 220),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: borderColor,
+              width: node.isSelected ? 2 : 1,
             ),
-          ),
-          if (node.taxon.commonName != null &&
-              node.taxon.commonName!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                node.taxon.commonName!,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.primary,
-                ),
+            boxShadow: const <BoxShadow>[
+              BoxShadow(
+                color: Color(0x12000000),
+                blurRadius: 12,
+                offset: Offset(0, 6),
               ),
-            ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: <Widget>[
-              Chip(
-                visualDensity: VisualDensity.compact,
-                label: Text(node.taxon.rank.label),
-              ),
-              if (observationCount > 0)
-                Chip(
-                  visualDensity: VisualDensity.compact,
-                  avatar: const Icon(Icons.visibility_outlined, size: 16),
-                  label: Text('$observationCount seen'),
-                ),
             ],
           ),
-          if (!node.isSelected) ...<Widget>[
-            const SizedBox(height: 8),
-            Text('Ancestor context', style: theme.textTheme.bodySmall),
-          ],
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      node.taxon.scientificName,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.open_in_new,
+                    size: 16,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+              if (node.taxon.commonName != null &&
+                  node.taxon.commonName!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    node.taxon.commonName!,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: <Widget>[
+                  Chip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text(node.taxon.rank.label),
+                  ),
+                  if (observationCount > 0)
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      avatar: const Icon(Icons.visibility_outlined, size: 16),
+                      label: Text('$observationCount seen'),
+                    ),
+                ],
+              ),
+              if (!node.isSelected) ...<Widget>[
+                const SizedBox(height: 8),
+                Text('Ancestor context', style: theme.textTheme.bodySmall),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
